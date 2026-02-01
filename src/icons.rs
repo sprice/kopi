@@ -1,0 +1,9 @@
+pub const ICON_SIDEBAR_TOGGLE: &str = "assets/icons/sidebar_toggle.svg";
+pub const ICON_STAR: &str = "assets/icons/star.svg";
+pub const ICON_STAR_FILLED: &str = "assets/icons/star_filled.svg";
+pub const ICON_TRASH: &str = "assets/icons/trash.svg";
+pub const ICON_COPY: &str = "assets/icons/copy.svg";
+pub const ICON_CHECK: &str = "assets/icons/check.svg";
+pub const ICON_PENCIL: &str = "assets/icons/pencil.svg";
+pub const ICON_SEARCH: &str = "assets/icons/search.svg";
+pub const ICON_UNDO: &str = "assets/icons/undo.svg";

@@ -1,0 +1,38 @@
+[package]
+name = "kopi"
+version = "0.1.0"
+edition = "2024"
+
+[package.metadata.cargo-machete]
+ignored = ["block2", "core-text", "objc2", "objc2-app-kit", "objc2-foundation"]
+
+[package.metadata.bundle]
+name = "Kopi"
+identifier = "com.kopi.clipboard"
+resources = ["assets"]
+category = "Productivity"
+icon = ["assets/icon.icns"]
+
+[dependencies]
+arboard = "3.6"
+block2 = "0.6"
+chrono = { version = "0.4.42", features = ["serde"] }
+# Exact version pin required for compatibility with current gpui/gpui-component versions
+core-text = "=21.0.0"
+dirs = "6.0"
+env_logger = "0.11"
+indexmap = "2.13"
+gpui = { version = "0.2.2" }
+gpui-component = { version = "0.4.1" }
+gpui-component-assets = "0.4.1"
+include_dir = "0.7"
+log = "0.4"
+objc2 = "0.6.3"
+objc2-app-kit = "0.3.2"
+objc2-foundation = "0.3.2"
+rust-embed = "8.11"
+rusqlite = { version = "0.35", features = ["bundled"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+uuid = { version = "1.20", features = ["v4", "serde"] }
+blake3 = "1.8"

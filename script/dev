@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if ! command -v cargo-watch &> /dev/null; then
+    echo "Error: cargo-watch is not installed. Install with: cargo install cargo-watch"
+    exit 1
+fi
+
+cargo watch -x run

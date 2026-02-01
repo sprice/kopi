@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+set -x
+
+cargo clippy --release --all-targets --all-features -- --deny warnings
+cargo machete

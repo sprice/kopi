@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo bundle:*)",
+      "Bash(cargo test:*)",
+      "Bash(cargo check:*)",
+      "Bash(cargo tree:*)",
+      "Bash(cargo build:*)",
+      "Bash(cargo fmt:*)",
+      "Bash(cargo clippy:*)",
+      "Bash(cargo clean:*)",
+      "Bash(script/bundle-mac:*)",
+      "Bash(echo:*)",
+      "Bash(rg:*)",
+      "Bash(./script/lint:*)"
+    ]
+  }
+}
