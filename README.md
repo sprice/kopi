@@ -6,6 +6,8 @@ A native macOS clipboard manager built with Rust and GPUI.
 
 Kopi monitors the system clipboard for new text content and maintains a persistent, searchable history of copied items. Users can organize clips with favorites, rename entries, edit content, and quickly re-copy items to the clipboard.
 
+![Screenshot](screenshot.png)
+
 ## Features
 
 - **Clipboard Monitoring**: Automatically captures text copied from any application
