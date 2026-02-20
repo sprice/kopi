@@ -163,3 +163,61 @@ pub fn save_window_state(state: &WindowState) {
     let saver = WINDOW_STATE_SAVER.get_or_init(WindowStateSaver::new);
     saver.save(state);
 }
+
+// --- App Settings (capture_editor_copies, etc.) ---
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AppSettings {
+    #[serde(default)]
+    pub capture_editor_copies: bool,
+}
+
+fn app_settings_path() -> Option<PathBuf> {
+    #[cfg(debug_assertions)]
+    let filename = "settings.dev.json";
+    #[cfg(not(debug_assertions))]
+    let filename = "settings.json";
+
+    dirs::data_dir().map(|d| d.join("kopi").join(filename))
+}
+
+pub fn load_app_settings() -> AppSettings {
+    let Some(path) = app_settings_path() else {
+        return AppSettings::default();
+    };
+    let Ok(contents) = fs::read_to_string(&path) else {
+        return AppSettings::default();
+    };
+    match serde_json::from_str::<AppSettings>(&contents) {
+        Ok(settings) => settings,
+        Err(e) => {
+            warn!("Failed to parse app settings: {}", e);
+            AppSettings::default()
+        }
+    }
+}
+
+pub fn save_app_settings(settings: &AppSettings) {
+    let Some(path) = app_settings_path() else {
+        warn!("Could not determine app settings path");
+        return;
+    };
+
+    if let Some(parent) = path.parent()
+        && let Err(e) = fs::create_dir_all(parent)
+    {
+        warn!("Failed to create settings directory: {}", e);
+        return;
+    }
+
+    match serde_json::to_string_pretty(settings) {
+        Ok(json) => {
+            if let Err(e) = fs::write(&path, json) {
+                warn!("Failed to write app settings: {}", e);
+            }
+        }
+        Err(e) => {
+            warn!("Failed to serialize app settings: {}", e);
+        }
+    }
+}

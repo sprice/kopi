@@ -25,6 +25,8 @@ pub struct ClipboardMonitor {
     #[allow(clippy::type_complexity)]
     on_new_entry: Arc<Mutex<Option<Box<dyn Fn(ClipboardEntry) + Send + 'static>>>>,
     running: Arc<std::sync::atomic::AtomicBool>,
+    capture_editor_copies: std::sync::atomic::AtomicBool,
+    window_active: std::sync::atomic::AtomicBool,
 }
 
 impl ClipboardMonitor {
@@ -37,6 +39,8 @@ impl ClipboardMonitor {
             internal_copy_hash: AtomicU64::new(0),
             on_new_entry: Arc::new(Mutex::new(None)),
             running: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            capture_editor_copies: std::sync::atomic::AtomicBool::new(false),
+            window_active: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -152,6 +156,13 @@ impl ClipboardMonitor {
 
         info!("New clipboard content detected (hash={})", current_hash);
 
+        if !self.capture_editor_copies.load(Ordering::SeqCst)
+            && self.window_active.load(Ordering::SeqCst)
+        {
+            debug!("Suppressing editor copy (capture off, window active)");
+            return;
+        }
+
         let pasteboard_types = sensitive::get_pasteboard_types();
         if sensitive::should_skip_content(&pasteboard_types) {
             debug!("Skipping password manager clipboard content");
@@ -177,6 +188,18 @@ impl ClipboardMonitor {
         if let Some(callback) = guard.as_ref() {
             callback(entry);
         }
+    }
+
+    pub fn set_capture_editor_copies(&self, enabled: bool) {
+        self.capture_editor_copies.store(enabled, Ordering::SeqCst);
+    }
+
+    pub fn capture_editor_copies(&self) -> bool {
+        self.capture_editor_copies.load(Ordering::SeqCst)
+    }
+
+    pub fn set_window_active(&self, active: bool) {
+        self.window_active.store(active, Ordering::SeqCst);
     }
 
     pub fn stop(&self) {
@@ -206,6 +229,18 @@ impl ClipboardMonitorHandle {
     pub fn copy_internal(&self, content: &str) -> Result<(), arboard::Error> {
         self.monitor.copy_to_clipboard(content)
     }
+
+    pub fn set_capture_editor_copies(&self, enabled: bool) {
+        self.monitor.set_capture_editor_copies(enabled);
+    }
+
+    pub fn capture_editor_copies(&self) -> bool {
+        self.monitor.capture_editor_copies()
+    }
+
+    pub fn set_window_active(&self, active: bool) {
+        self.monitor.set_window_active(active);
+    }
 }
 
 impl Drop for ClipboardMonitorHandle {
@@ -231,6 +266,8 @@ mod tests {
             internal_copy_hash: AtomicU64::new(0),
             on_new_entry: Arc::new(Mutex::new(None)),
             running: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            capture_editor_copies: std::sync::atomic::AtomicBool::new(false),
+            window_active: std::sync::atomic::AtomicBool::new(false),
         }
     }
 

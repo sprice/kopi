@@ -25,13 +25,32 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 use storage::Storage;
 use ui::theme::{WINDOW_DEFAULT_HEIGHT, WINDOW_DEFAULT_WIDTH, configure_kopi_theme};
-use ui::window::{CancelTitleEdit, KopiWindow};
+use ui::window::{CancelTitleEdit, DeleteSelectedEntries, KopiWindow};
 
-actions!(kopi, [Quit, ClearDeletedItems]);
+actions!(kopi, [Quit, ClearDeletedItems, ToggleCaptureEditorCopies]);
 
 fn quit(_: &Quit, cx: &mut App) {
     info!("Quitting Kopi...");
     cx.quit();
+}
+
+pub fn rebuild_menus(cx: &mut App, capture_on: bool) {
+    let capture_label = if capture_on {
+        "Capture Editor Copies (On)"
+    } else {
+        "Capture Editor Copies (Off)"
+    };
+
+    cx.set_menus(vec![Menu {
+        name: "Kopi".into(),
+        items: vec![
+            MenuItem::action(capture_label, ToggleCaptureEditorCopies),
+            MenuItem::separator(),
+            MenuItem::action("Clear Deleted Items", ClearDeletedItems),
+            MenuItem::separator(),
+            MenuItem::action("Quit Kopi", Quit),
+        ],
+    }]);
 }
 
 const CLEANUP_INTERVAL_HOURS: u64 = 1;
@@ -121,7 +140,10 @@ fn main() {
     run_cleanup(&storage);
     let _cleanup_task = start_cleanup_task(Arc::clone(&storage));
 
+    let app_settings = settings::load_app_settings();
+
     let clipboard_monitor = Arc::new(ClipboardMonitor::new(Arc::clone(&storage)));
+    clipboard_monitor.set_capture_editor_copies(app_settings.capture_editor_copies);
     let _monitor_handle = clipboard_monitor.start();
     info!("Clipboard monitoring started");
 
@@ -133,7 +155,9 @@ fn main() {
 
             cx.bind_keys([
                 KeyBinding::new("cmd-q", Quit, None),
+                KeyBinding::new("cmd-shift-c", ToggleCaptureEditorCopies, None),
                 KeyBinding::new("escape", CancelTitleEdit, None),
+                KeyBinding::new("cmd-backspace", DeleteSelectedEntries, None),
             ]);
 
             cx.on_action(quit);
@@ -150,14 +174,22 @@ fn main() {
                 }
             });
 
-            cx.set_menus(vec![Menu {
-                name: "Kopi".into(),
-                items: vec![
-                    MenuItem::action("Clear Deleted Items", ClearDeletedItems),
-                    MenuItem::separator(),
-                    MenuItem::action("Quit Kopi", Quit),
-                ],
-            }]);
+            let initial_capture = clipboard_monitor.capture_editor_copies();
+            rebuild_menus(cx, initial_capture);
+
+            let monitor_for_toggle = Arc::clone(&clipboard_monitor);
+            cx.on_action(move |_: &ToggleCaptureEditorCopies, cx| {
+                let new_val = !monitor_for_toggle.capture_editor_copies();
+                monitor_for_toggle.set_capture_editor_copies(new_val);
+                info!(
+                    "Capture editor copies toggled to {}",
+                    if new_val { "on" } else { "off" }
+                );
+                settings::save_app_settings(&settings::AppSettings {
+                    capture_editor_copies: new_val,
+                });
+                rebuild_menus(cx, new_val);
+            });
 
             open_main_window(cx, Arc::clone(&storage), Arc::clone(&clipboard_monitor));
         });

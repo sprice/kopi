@@ -12,7 +12,9 @@
       "Bash(script/bundle-mac:*)",
       "Bash(echo:*)",
       "Bash(rg:*)",
-      "Bash(./script/lint:*)"
+      "Bash(./script/lint:*)",
+      "Bash(find:*)",
+      "Bash(script/lint:*)"
     ]
   }
 }

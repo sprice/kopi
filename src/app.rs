@@ -5,7 +5,7 @@ use crate::ui::theme::{SIDEBAR_DEFAULT_WIDTH_F32, SIDEBAR_MAX_WIDTH_F32, SIDEBAR
 use chrono::{DateTime, Utc};
 use indexmap::IndexMap;
 use log::{debug, error, info, warn};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -21,6 +21,8 @@ pub struct AppState {
     pub has_more_entries: bool,
     pub loading_more: bool,
     pub search_query: String,
+    pub multi_selected_ids: HashSet<Uuid>,
+    pub selection_anchor_id: Option<Uuid>,
     fts_results: Option<Vec<OwnedSearchResult>>,
     storage: Arc<Storage>,
     matcher: SubstringMatcher,
@@ -60,6 +62,8 @@ impl AppState {
             has_more_entries: false,
             loading_more: false,
             search_query: String::new(),
+            multi_selected_ids: HashSet::new(),
+            selection_anchor_id: selected_entry_id,
             fts_results: None,
             storage,
             matcher: SubstringMatcher,
@@ -122,6 +126,7 @@ impl AppState {
     pub fn select_entry(&mut self, id: Uuid) {
         if self.entries.contains_key(&id) && self.selected_entry_id != Some(id) {
             self.selected_entry_id = Some(id);
+            self.selection_anchor_id = Some(id);
             match self.storage.get_entry_content(&id) {
                 Ok(content) => {
                     self.selected_content = content;
@@ -158,6 +163,7 @@ impl AppState {
     pub fn clear_search(&mut self) {
         self.search_query.clear();
         self.fts_results = None;
+        self.multi_selected_ids.clear();
     }
 
     pub fn is_searching(&self) -> bool {
@@ -394,6 +400,7 @@ impl AppState {
             Ok(metadata_vec) => {
                 self.has_more_entries = metadata_vec.len() >= PAGE_SIZE;
                 self.entries = metadata_vec.into_iter().map(|m| (m.id, m)).collect();
+                self.multi_selected_ids.clear();
                 info!(
                     "Reloaded {} entry metadata from database",
                     self.entries.len()
@@ -421,6 +428,77 @@ impl AppState {
                 error!("Failed to reload entries: {}", e);
             }
         }
+    }
+
+    pub fn visible_order(&self) -> Vec<Uuid> {
+        let (starred, recents) = self.partitioned_entries();
+        starred.into_iter().chain(recents).map(|e| e.id).collect()
+    }
+
+    pub fn select_range(&mut self, target_id: Uuid) {
+        let Some(anchor_id) = self.selection_anchor_id else {
+            return;
+        };
+
+        let order = self.visible_order();
+        let anchor_pos = order.iter().position(|id| *id == anchor_id);
+        let target_pos = order.iter().position(|id| *id == target_id);
+
+        if let (Some(a), Some(b)) = (anchor_pos, target_pos) {
+            let (start, end) = if a <= b { (a, b) } else { (b, a) };
+            self.multi_selected_ids = order[start..=end].iter().copied().collect();
+        }
+    }
+
+    pub fn clear_multi_select(&mut self) {
+        self.multi_selected_ids.clear();
+    }
+
+    pub fn is_multi_selected(&self, id: Uuid) -> bool {
+        self.multi_selected_ids.contains(&id)
+    }
+
+    pub fn soft_delete_selected(&mut self) -> Vec<Uuid> {
+        let ids_to_delete: Vec<Uuid> = if self.multi_selected_ids.is_empty() {
+            self.selected_entry_id.into_iter().collect()
+        } else {
+            self.multi_selected_ids.iter().copied().collect()
+        };
+
+        let mut deleted = Vec::new();
+        for id in &ids_to_delete {
+            if self.entries.contains_key(id) && !self.is_pending_delete(*id) {
+                self.soft_delete(*id);
+                deleted.push(*id);
+            }
+        }
+
+        self.multi_selected_ids.clear();
+
+        // If the current selection was deleted, pick the next non-deleted entry
+        if let Some(sel) = self.selected_entry_id
+            && deleted.contains(&sel)
+        {
+            let next = self
+                .entries
+                .iter()
+                .find(|(id, _)| !self.pending_deletes.contains_key(id))
+                .map(|(id, _)| *id);
+            self.selected_entry_id = next;
+            if let Some(new_id) = next {
+                match self.storage.get_entry_content(&new_id) {
+                    Ok(content) => self.selected_content = content,
+                    Err(e) => {
+                        error!("Failed to load content for entry {}: {}", new_id, e);
+                        self.selected_content = None;
+                    }
+                }
+            } else {
+                self.selected_content = None;
+            }
+        }
+
+        deleted
     }
 
     pub fn storage(&self) -> &Arc<Storage> {

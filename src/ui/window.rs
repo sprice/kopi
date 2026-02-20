@@ -9,14 +9,15 @@ use crate::storage::Storage;
 use crate::ui::components::animated_icon_svg;
 use crate::ui::theme::{
     BORDER_RADIUS_SM, BORDER_WIDTH, COPY_BUTTON_OFFSET, COPY_BUTTON_SIZE, FONT_SIZE_BASE,
-    FONT_SIZE_SM, HEADER_CLEARANCE_HEIGHT, IconSize, KopiColors, KopiStyleExt, SIDEBAR_ITEM_HEIGHT,
-    SIDEBAR_SECTION_HEIGHT, SPACING_LG, SPACING_MD, SPACING_SM, SPACING_XL, SPACING_XS,
-    get_kopi_colors,
+    FONT_SIZE_SM, FONT_SIZE_XS, HEADER_CLEARANCE_HEIGHT, IconSize, KopiColors, KopiStyleExt,
+    SIDEBAR_ITEM_HEIGHT, SIDEBAR_SECTION_HEIGHT, SPACING_LG, SPACING_MD, SPACING_SM, SPACING_XL,
+    SPACING_XS, get_kopi_colors,
 };
 
 use gpui::{
-    Animation, AnimationExt, AnyElement, Context, CursorStyle, Div, Entity, Hsla, IntoElement,
-    Render, SharedString, Subscription, Timer, Window, actions, div, ease_in_out, prelude::*, svg,
+    Animation, AnimationExt, AnyElement, Context, CursorStyle, Div, Entity, FocusHandle, Hsla,
+    IntoElement, Render, SharedString, Subscription, Timer, Window, actions, div, ease_in_out,
+    prelude::*, svg,
 };
 use gpui_component::Sizable;
 use gpui_component::StyledExt;
@@ -54,7 +55,7 @@ impl SidebarButtonKind {
     }
 }
 
-actions!(kopi, [CancelTitleEdit]);
+actions!(kopi, [CancelTitleEdit, DeleteSelectedEntries]);
 
 const EDITOR_SAVE_DEBOUNCE_MS: u64 = 300;
 const COPY_ANIMATION_SCALE_MIN: f32 = 0.8;
@@ -84,12 +85,15 @@ pub struct KopiWindow {
     editor: EditorState,
     title_edit: TitleEditState,
     search_input_state: Entity<InputState>,
+    focus_handle: FocusHandle,
     hovered_icons: HashSet<SharedString>,
     skip_blur: bool,
     #[allow(dead_code)]
     appearance_subscription: Subscription,
     #[allow(dead_code)]
     bounds_subscription: Subscription,
+    #[allow(dead_code)]
+    activation_subscription: Subscription,
 }
 
 impl KopiWindow {
@@ -106,6 +110,9 @@ impl KopiWindow {
         let title_input_state = cx.new(|cx| InputState::new(window, cx));
 
         let search_input_state = cx.new(|cx| InputState::new(window, cx));
+
+        let focus_handle = cx.focus_handle();
+        focus_handle.focus(window);
 
         let editor_entry_id = app_state.selected_entry_id;
         if let Some(content) = app_state.selected_entry_content() {
@@ -133,6 +140,12 @@ impl KopiWindow {
             settings::save_window_state(&state);
         });
 
+        let activation_subscription =
+            cx.observe_window_activation(window, |this: &mut KopiWindow, window, _cx| {
+                let active = window.is_window_active();
+                this.clipboard_monitor.set_window_active(active);
+            });
+
         let editor = EditorState {
             state: editor_input_state,
             entry_id: editor_entry_id,
@@ -156,10 +169,12 @@ impl KopiWindow {
             editor,
             title_edit,
             search_input_state,
+            focus_handle,
             hovered_icons: HashSet::new(),
             skip_blur: false,
             appearance_subscription,
             bounds_subscription,
+            activation_subscription,
         }
     }
 
@@ -378,6 +393,58 @@ impl KopiWindow {
         }
     }
 
+    fn handle_delete_selected(
+        &mut self,
+        _: &DeleteSelectedEntries,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let deleted_ids = self.app_state.soft_delete_selected();
+        if deleted_ids.is_empty() {
+            return;
+        }
+
+        for &entry_id in &deleted_ids {
+            self.clear_entry_hover_state(entry_id);
+        }
+
+        self.sync_editor_to_selection(_window, cx);
+
+        for entry_id in deleted_ids {
+            let entity = cx.entity().clone();
+            _window
+                .spawn(cx, async move |cx| {
+                    Timer::after(std::time::Duration::from_secs(5)).await;
+                    if let Err(e) = entity.update(cx, |this: &mut KopiWindow, cx| {
+                        if this.app_state.is_pending_delete(entry_id) {
+                            this.app_state.clear_pending_delete(entry_id);
+                            cx.notify();
+                        }
+                    }) {
+                        warn!("Failed to clear pending delete: {:?}", e);
+                    }
+                })
+                .detach();
+        }
+
+        cx.notify();
+    }
+
+    fn handle_toggle_capture(
+        &mut self,
+        _: &crate::ToggleCaptureEditorCopies,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let new_val = !self.clipboard_monitor.capture_editor_copies();
+        self.clipboard_monitor.set_capture_editor_copies(new_val);
+        settings::save_app_settings(&settings::AppSettings {
+            capture_editor_copies: new_val,
+        });
+        crate::rebuild_menus(cx, new_val);
+        cx.notify();
+    }
+
     pub fn sync_editor_to_selection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let new_id = self.app_state.selected_entry_id;
 
@@ -574,16 +641,31 @@ impl KopiWindow {
             .flex()
             .flex_col()
             .overflow_hidden()
-            .child(
+            .child({
+                let capture_on = self.clipboard_monitor.capture_editor_copies();
                 div()
                     .h(HEADER_CLEARANCE_HEIGHT + SPACING_XS)
                     .flex_shrink_0()
                     .flex()
                     .items_center()
-                    .justify_end()
+                    .justify_between()
+                    .pl(SPACING_MD)
                     .pr(SPACING_SM)
-                    .child(self.render_sidebar_toggle(cx)),
-            )
+                    .child(if capture_on {
+                        div()
+                            .px(SPACING_XS)
+                            .py(gpui::px(1.))
+                            .rounded(BORDER_RADIUS_SM)
+                            .bg(colors.accent)
+                            .text_color(colors.background)
+                            .text_size(FONT_SIZE_XS)
+                            .child("CAPTURE")
+                            .into_any_element()
+                    } else {
+                        div().into_any_element()
+                    })
+                    .child(self.render_sidebar_toggle(cx))
+            })
             .child(self.render_search_section(cx))
             .child(
                 div().flex_1().min_h_0().child(
@@ -746,6 +828,8 @@ impl KopiWindow {
     ) -> impl IntoElement {
         let colors = get_kopi_colors(cx);
         let is_selected = self.app_state.selected_entry_id == Some(entry.id);
+        let is_multi_selected = self.app_state.is_multi_selected(entry.id);
+        let show_highlight = is_selected || is_multi_selected;
         let entry_id = entry.id;
         let row_group: SharedString = format!("row-{}", entry.id).into();
         let is_pending_delete = self.app_state.is_pending_delete(entry_id);
@@ -779,26 +863,38 @@ impl KopiWindow {
         div()
             .id(gpui::ElementId::Name(entry.id.to_string().into()))
             .group(row_group.clone())
-            .sidebar_item(&colors, is_selected)
+            .sidebar_item(&colors, show_highlight)
             .flex()
             .items_center()
             .justify_between()
-            .hover(|s| if !is_selected { s.bg(colors.hover) } else { s })
+            .hover(|s| {
+                if !show_highlight {
+                    s.bg(colors.hover)
+                } else {
+                    s
+                }
+            })
             .child(self.render_sidebar_item_title(entry, &colors, cx))
             .child(self.render_pencil_button(entry_id, &colors, row_group.clone(), cx))
             .child(self.render_star_button(entry, &colors, row_group.clone(), cx))
             .child(self.render_trash_button(entry_id, &colors, row_group.clone(), cx))
             .on_mouse_down(
                 gpui::MouseButton::Left,
-                cx.listener(move |this, _, window, cx| {
+                cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
                     if this.title_edit.editing_entry_id == Some(entry_id) {
                         return;
                     }
                     if this.title_edit.editing_entry_id.is_some() {
                         this.save_title_edit(window, cx);
                     }
-                    this.app_state.select_entry(entry_id);
-                    this.sync_editor_to_selection(window, cx);
+                    if event.modifiers.shift && this.app_state.selection_anchor_id.is_some() {
+                        this.app_state.select_range(entry_id);
+                    } else {
+                        this.app_state.clear_multi_select();
+                        this.app_state.select_entry(entry_id);
+                        this.app_state.selection_anchor_id = Some(entry_id);
+                        this.sync_editor_to_selection(window, cx);
+                    }
                 }),
             )
             .into_any_element()
@@ -983,6 +1079,7 @@ impl KopiWindow {
             .mr(-SPACING_MD)
             .on_mouse_down(gpui::MouseButton::Left, move |_, window, cx| {
                 kopi_window.update(cx, |this, cx| {
+                    this.app_state.clear_multi_select();
                     this.app_state.soft_delete(entry_id);
                     this.clear_entry_hover_state(entry_id);
                     cx.notify();
@@ -1144,6 +1241,8 @@ impl Render for KopiWindow {
         let theme = cx.theme();
 
         div()
+            .id("kopi-root")
+            .track_focus(&self.focus_handle)
             .font_family(theme.font_family.clone())
             .text_size(theme.font_size)
             .size_full()
@@ -1153,6 +1252,8 @@ impl Render for KopiWindow {
             .text_color(colors.foreground)
             .relative()
             .on_action(cx.listener(Self::handle_cancel_title_edit))
+            .on_action(cx.listener(Self::handle_delete_selected))
+            .on_action(cx.listener(Self::handle_toggle_capture))
             .on_mouse_down(
                 gpui::MouseButton::Left,
                 cx.listener(|this, _, window, _cx| {
@@ -1163,7 +1264,7 @@ impl Render for KopiWindow {
                     if this.is_within_title_edit_grace_period() {
                         return;
                     }
-                    window.blur();
+                    this.focus_handle.focus(window);
                 }),
             )
             .child(self.render_header(cx))
