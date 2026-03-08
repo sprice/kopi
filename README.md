@@ -32,12 +32,23 @@ When you delete an entry, it's soft-deleted with a 5-second undo window. After t
 
 To permanently delete all soft-deleted entries immediately, use **Kopi → Clear Deleted Items** from the menu bar.
 
+## Installation
+
+1. Download the latest `.dmg` from [Releases](https://github.com/sprice/kopi/releases)
+2. Open the DMG and drag **Kopi** into **Applications**
+3. Before launching, open Terminal and run:
+   ```bash
+   xattr -cr /Applications/Kopi.app
+   ```
+   This is required because the app is not yet notarized with Apple. macOS will show a "damaged" error without this step.
+4. Open Kopi from Applications
+
 ## Requirements
 
 - macOS (Intel or Apple Silicon)
-- Rust 1.85+ (required for Rust 2024 edition)
+- Rust 1.85+ (required for Rust 2024 edition, only needed for building from source)
 
-## Building
+## Building from Source
 
 ```bash
 cargo build --release
